@@ -15,7 +15,7 @@ export function useAuth() {
     // Get any anonymous work
     const anonWork = getAnonWorkData();
 
-    if (anonWork && anonWork.messages.length > 0) {
+    if (anonWork && Array.isArray(anonWork.messages) && anonWork.messages.length > 0) {
       // Create a project with the anonymous work
       const project = await createProject({
         name: `Design from ${new Date().toLocaleTimeString()}`,
@@ -31,7 +31,7 @@ export function useAuth() {
     // Otherwise, find the user's most recent project
     const projects = await getProjects();
 
-    if (projects.length > 0) {
+    if (projects && Array.isArray(projects) && projects.length > 0) {
       router.push(`/${projects[0].id}`);
       return;
     }
