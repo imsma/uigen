@@ -15,6 +15,7 @@ UIGen is an AI-powered React component generator that allows users to create Rea
 - **AI Integration**: Anthropic Claude AI via Vercel AI SDK
 - **Code Execution**: Browser-based JSX transformation using @babel/standalone
 - **Testing**: Vitest with React Testing Library
+- **vitest config is in vitest.config.mts**
 
 ### Key Components
 
