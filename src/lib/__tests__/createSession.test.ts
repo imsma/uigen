@@ -1,6 +1,6 @@
 import { test, expect, vi, beforeEach } from "vitest";
 
-// Mock server-only module
+// Mock server-only module to avoid client-side errors
 vi.mock("server-only", () => ({}));
 
 // Import after mocking
@@ -8,19 +8,13 @@ import { createSession } from "../auth";
 import { cookies } from "next/headers";
 import { SignJWT } from "jose";
 
-// Mock next/headers
+// Mock dependencies
 vi.mock("next/headers", () => ({
   cookies: vi.fn(),
 }));
 
-// Mock jose
 vi.mock("jose", () => ({
-  SignJWT: vi.fn().mockImplementation(() => ({
-    setProtectedHeader: vi.fn().mockReturnThis(),
-    setExpirationTime: vi.fn().mockReturnThis(),
-    setIssuedAt: vi.fn().mockReturnThis(),
-    sign: vi.fn(),
-  })),
+  SignJWT: vi.fn(),
 }));
 
 const mockCookieStore = {
@@ -32,7 +26,7 @@ beforeEach(() => {
   vi.mocked(cookies).mockResolvedValue(mockCookieStore as any);
 });
 
-test("createSession creates JWT token with correct payload", async () => {
+test("createSession creates JWT token with correct payload structure", async () => {
   const mockSign = vi.fn().mockResolvedValue("test-jwt-token");
   const mockSignJWT = {
     setProtectedHeader: vi.fn().mockReturnThis(),
@@ -43,13 +37,27 @@ test("createSession creates JWT token with correct payload", async () => {
   
   vi.mocked(SignJWT).mockImplementation(() => mockSignJWT as any);
 
-  await createSession("user-123", "user@example.com");
+  await createSession("user-123", "test@example.com");
 
   expect(SignJWT).toHaveBeenCalledWith({
     userId: "user-123",
-    email: "user@example.com",
+    email: "test@example.com",
     expiresAt: expect.any(Date),
   });
+});
+
+test("createSession configures JWT with proper settings", async () => {
+  const mockSign = vi.fn().mockResolvedValue("test-token");
+  const mockSignJWT = {
+    setProtectedHeader: vi.fn().mockReturnThis(),
+    setExpirationTime: vi.fn().mockReturnThis(),
+    setIssuedAt: vi.fn().mockReturnThis(),
+    sign: mockSign,
+  };
+  
+  vi.mocked(SignJWT).mockImplementation(() => mockSignJWT as any);
+
+  await createSession("user-456", "user@example.com");
 
   expect(mockSignJWT.setProtectedHeader).toHaveBeenCalledWith({ alg: "HS256" });
   expect(mockSignJWT.setExpirationTime).toHaveBeenCalledWith("7d");
@@ -58,7 +66,7 @@ test("createSession creates JWT token with correct payload", async () => {
 });
 
 test("createSession sets cookie with correct configuration", async () => {
-  const mockSign = vi.fn().mockResolvedValue("test-jwt-token");
+  const mockSign = vi.fn().mockResolvedValue("test-token");
   const mockSignJWT = {
     setProtectedHeader: vi.fn().mockReturnThis(),
     setExpirationTime: vi.fn().mockReturnThis(),
@@ -68,23 +76,18 @@ test("createSession sets cookie with correct configuration", async () => {
   
   vi.mocked(SignJWT).mockImplementation(() => mockSignJWT as any);
 
-  await createSession("user-456", "another@example.com");
+  await createSession("user-789", "cookie@example.com");
 
-  expect(mockCookieStore.set).toHaveBeenCalledWith("auth-token", "test-jwt-token", {
+  expect(mockCookieStore.set).toHaveBeenCalledWith("auth-token", "test-token", {
     httpOnly: true,
-    secure: false,
+    secure: false, // development environment
     sameSite: "lax",
     expires: expect.any(Date),
     path: "/",
   });
-
-  const [cookieName, token, options] = mockCookieStore.set.mock.calls[0];
-  expect(cookieName).toBe("auth-token");
-  expect(token).toBe("test-jwt-token");
-  expect(options.expires).toBeInstanceOf(Date);
 });
 
-test("createSession uses secure cookie in production", async () => {
+test("createSession uses secure cookie in production environment", async () => {
   const originalEnv = process.env.NODE_ENV;
   process.env.NODE_ENV = "production";
 
@@ -98,7 +101,7 @@ test("createSession uses secure cookie in production", async () => {
   
   vi.mocked(SignJWT).mockImplementation(() => mockSignJWT as any);
 
-  await createSession("user-789", "prod@example.com");
+  await createSession("user-prod", "prod@example.com");
 
   expect(mockCookieStore.set).toHaveBeenCalledWith("auth-token", "prod-token", {
     httpOnly: true,
@@ -111,7 +114,7 @@ test("createSession uses secure cookie in production", async () => {
   process.env.NODE_ENV = originalEnv;
 });
 
-test("createSession uses development secret when JWT_SECRET missing", async () => {
+test("createSession uses development secret when JWT_SECRET is missing", async () => {
   const originalSecret = process.env.JWT_SECRET;
   delete process.env.JWT_SECRET;
 
@@ -132,8 +135,8 @@ test("createSession uses development secret when JWT_SECRET missing", async () =
   if (originalSecret) process.env.JWT_SECRET = originalSecret;
 });
 
-test("createSession propagates JWT signing errors", async () => {
-  const mockSign = vi.fn().mockRejectedValue(new Error("Signing failed"));
+test("createSession handles JWT signing errors appropriately", async () => {
+  const mockSign = vi.fn().mockRejectedValue(new Error("JWT signing failed"));
   const mockSignJWT = {
     setProtectedHeader: vi.fn().mockReturnThis(),
     setExpirationTime: vi.fn().mockReturnThis(),
@@ -143,5 +146,28 @@ test("createSession propagates JWT signing errors", async () => {
   
   vi.mocked(SignJWT).mockImplementation(() => mockSignJWT as any);
 
-  await expect(createSession("user-err", "error@example.com")).rejects.toThrow("Signing failed");
+  await expect(createSession("user-err", "error@example.com")).rejects.toThrow("JWT signing failed");
+});
+
+test("createSession sets 7-day expiration on cookie", async () => {
+  const mockSign = vi.fn().mockResolvedValue("token");
+  const mockSignJWT = {
+    setProtectedHeader: vi.fn().mockReturnThis(),
+    setExpirationTime: vi.fn().mockReturnThis(),
+    setIssuedAt: vi.fn().mockReturnThis(),
+    sign: mockSign,
+  };
+  
+  vi.mocked(SignJWT).mockImplementation(() => mockSignJWT as any);
+
+  await createSession("user-exp", "exp@example.com");
+
+  const [, , options] = mockCookieStore.set.mock.calls[0];
+  expect(options.expires).toBeInstanceOf(Date);
+  
+  // Verify it's approximately 7 days from now (allowing 1 second tolerance)
+  const expectedMs = 7 * 24 * 60 * 60 * 1000;
+  const actualMs = options.expires.getTime() - Date.now();
+  expect(actualMs).toBeGreaterThan(expectedMs - 1000);
+  expect(actualMs).toBeLessThan(expectedMs + 1000);
 });
